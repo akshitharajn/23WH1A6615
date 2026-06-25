@@ -1,20 +1,57 @@
 import { useState, useEffect } from "react";
-import { fetchNotifications } from "../apis/notifications";
+import { fetchNotifications, getTopNPriority } from "../api/notifications";
+import { createLogger } from "../../../logging-middleware/logger";
 
-export function useNotifications() {
-  const [notifications, setNotifications] = useState([]);
-  const [total, setTotal] = useState(0);
+const logger = createLogger("useNotifications");
+const PAGE_SIZE = 10;
+
+// For all notifications with client-side pagination and type filter
+export function useNotifications({ page = 1, type = "All" } = {}) {
+  const [all, setAll] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
   useEffect(() => {
-    const load = async () => {
-      const data = await fetchNotifications();
-      setNotifications(data.notifications ?? []);
-    };
+    setLoading(true);
+    setError(null);
+    fetchNotifications({ notification_type: type })
+      .then((data) => {
+        logger.info("Loaded", { count: data.notifications?.length ?? 0 });
+        setAll(data.notifications || []);
+      })
+      .catch((err) => {
+        logger.error("Failed", { error: err.message });
+        setError(err.message);
+      })
+      .finally(() => setLoading(false));
+  }, [type]);
 
-    load();
-  }, [notifications]);
+  const totalPages = Math.max(1, Math.ceil(all.length / PAGE_SIZE));
+  const notifications = all.slice((page - 1) * PAGE_SIZE, page * PAGE_SIZE);
+  return { notifications, totalPages, loading, error };
+}
 
-  const totalPages = 0;
+// For priority inbox - fetches all, returns top N sorted by weight + recency
+export function usePriorityNotifications(topN = 10) {
+  const [notifications, setNotifications] = useState([]);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(null);
 
-  return { notifications, total, totalPages, loading: false, error: true };
+  useEffect(() => {
+    setLoading(true);
+    setError(null);
+    fetchNotifications()
+      .then((data) => {
+        const top = getTopNPriority(data.notifications || [], topN);
+        logger.info("Priority loaded", { count: top.length });
+        setNotifications(top);
+      })
+      .catch((err) => {
+        logger.error("Priority failed", { error: err.message });
+        setError(err.message);
+      })
+      .finally(() => setLoading(false));
+  }, [topN]);
+
+  return { notifications, loading, error };
 }
